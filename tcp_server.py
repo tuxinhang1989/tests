@@ -2,6 +2,8 @@
 import socket
 import select
 import errno
+import os
+import time
 import threading
 
 
@@ -74,6 +76,7 @@ class TCPServer(object):
         return True
 
     def process_conn(self, conn, client_address):
+        time.sleep(2)
         self.finish_conn(conn, client_address)
         self.shutdown_conn(conn)
 
@@ -100,6 +103,10 @@ class TCPServer(object):
         conn.close()
 
 
+class ForkingMixin(object):
+    pass
+
+
 class RequestHandler(object):
     def __init__(self, conn, client_address, server):
         self.conn = conn
@@ -115,7 +122,7 @@ class RequestHandler(object):
 
 
 if __name__ == "__main__":
-    server_address = ("192.168.66.105", 8005)
+    server_address = ("127.0.0.1", 8005)
     server = TCPServer(server_address, RequestHandler)
     try:
         server.serve_forever()
