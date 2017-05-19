@@ -76,11 +76,11 @@ class TCPServer(object):
         return True
 
     def process_conn(self, conn, client_address):
-        time.sleep(2)
         self.finish_conn(conn, client_address)
         self.shutdown_conn(conn)
 
     def finish_conn(self, conn, client_address):
+        time.sleep(2)
         self.RequestHandlerClass(conn, client_address, self)
 
     def server_close(self):
@@ -103,7 +103,32 @@ class TCPServer(object):
         conn.close()
 
 
-class ForkingMixin(object):
+class ForkingMixIn(object):
+    active_children = []
+
+    def process_conn(self, conn, client_address):
+        print "conn: ", id(conn)
+        pid = os.fork()
+        if pid:  # parent
+            print "conn in parent: ", id(conn)
+            self.active_children.append(pid)
+            self.close_conn(conn)
+            return
+        else:
+            print "conn in child: ", id(conn)
+            try:
+                self.finish_conn(conn, client_address)
+                self.shutdown_conn(conn)
+                os._exit(0)
+            except:
+                try:
+                    self.handle_error(conn, client_address)
+                    self.shutdown_conn(conn)
+                finally:
+                    os._exit(1)
+
+
+class Server(TCPServer):
     pass
 
 
@@ -122,8 +147,8 @@ class RequestHandler(object):
 
 
 if __name__ == "__main__":
-    server_address = ("127.0.0.1", 8005)
-    server = TCPServer(server_address, RequestHandler)
+    server_address = ("0.0.0.0", 8005)
+    server = Server(server_address, RequestHandler)
     try:
         server.serve_forever()
     except (OSError, select.error) as e:
