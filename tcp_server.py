@@ -38,8 +38,6 @@ class TCPServer(object):
     def serve_forever(self, poll_interval=0.5):
         self.__is_shut_down.clear()
         try:
-            # conn, addr = self.socket.accept()
-            # print "connected by", addr
             while not self.__shutdown_request:
                 r, w, e = select.select([self], [], [], poll_interval)
                 if self in r:
@@ -152,7 +150,28 @@ class ForkingMixIn(object):
                     os._exit(1)
 
 
-class Server(ForkingMixIn, TCPServer):
+class ThreadingMixIn(object):
+    daemon_threads = False
+
+    def process_in_thread(self, conn, client_address):
+        try:
+            self.finish_conn(conn, client_address)
+            self.shutdown_conn(conn)
+        except:
+            self.handle_error(conn, client_address)
+            self.shutdown_conn(conn)
+
+    def process_conn(self, conn, client_address):
+        t = threading.Thread(target=self.process_in_thread, args=(conn, client_address))
+        t.daemon = self.daemon_threads
+        t.start()
+
+
+class ForkingTCPServer(ForkingMixIn, TCPServer):
+    pass
+
+
+class ThreadingTCPServer(ThreadingMixIn, TCPServer):
     pass
 
 
@@ -164,15 +183,21 @@ class RequestHandler(object):
         self.process()
 
     def process(self):
-        # print self.conn.recv(1024)
-        time.sleep(2)
+        print self.conn.recv(1024)
         response = "HTTP/1.1 200 OK\r\nServer:tcp server\r\nContent-Length:11\r\n\r\nhello world"
         self.conn.sendall(response)
 
 
+def shutdown(server):
+    time.sleep(5)
+    server.shutdown()
+
+
 if __name__ == "__main__":
     server_address = ("0.0.0.0", 8005)
-    server = Server(server_address, RequestHandler)
+    server = ThreadingTCPServer(server_address, RequestHandler)
+    # t = threading.Thread(target=shutdown, args=(server,))
+    # t.start()
     try:
         server.serve_forever()
     except (OSError, select.error) as e:

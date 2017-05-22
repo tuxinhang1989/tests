@@ -16,7 +16,7 @@ def visit():
 @gen.coroutine
 def main():
     futures = []
-    for i in range(19):
+    for i in range(25):
         futures.append(visit())
     yield futures
 
