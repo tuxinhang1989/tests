@@ -42,7 +42,6 @@ class TCPServer(object):
             # print "connected by", addr
             while not self.__shutdown_request:
                 r, w, e = select.select([self], [], [], poll_interval)
-                print r
                 if self in r:
                     self._handle_conn_noblock()
         finally:
@@ -80,7 +79,6 @@ class TCPServer(object):
         self.shutdown_conn(conn)
 
     def finish_conn(self, conn, client_address):
-        time.sleep(2)
         self.RequestHandlerClass(conn, client_address, self)
 
     def server_close(self):
@@ -104,20 +102,46 @@ class TCPServer(object):
 
 
 class ForkingMixIn(object):
-    active_children = []
+    active_children = None
+    max_children = 20
+
+    def collect_children(self):
+        if self.active_children is None:
+            return
+        while len(self.active_children) >= self.max_children:
+            try:
+                pid, status = os.waitpid(0, 0)
+            except os.error:
+                pid = None
+            print pid, status
+            if pid in self.active_children:
+                self.active_children.remove(pid)
+        for child in self.active_children:
+            try:
+                pid, status = os.waitpid(child, os.WNOHANG)
+            except os.error:
+                pid = None
+            if not pid:
+                continue
+            try:
+                self.active_children.remove(pid)
+            except ValueError, e:
+                raise ValueError("%s. x=%d and list=%r" % (e.message, pid, self.active_children))
 
     def process_conn(self, conn, client_address):
-        print "conn: ", id(conn)
+        self.collect_children()
         pid = os.fork()
         if pid:  # parent
-            print "conn in parent: ", id(conn)
+            if self.active_children is None:
+                self.active_children = []
             self.active_children.append(pid)
+            # print "children:", len(self.active_children), self.active_children
             self.close_conn(conn)
             return
         else:
-            print "conn in child: ", id(conn)
             try:
                 self.finish_conn(conn, client_address)
+                print "forked at:", time.time()
                 self.shutdown_conn(conn)
                 os._exit(0)
             except:
@@ -128,7 +152,7 @@ class ForkingMixIn(object):
                     os._exit(1)
 
 
-class Server(TCPServer):
+class Server(ForkingMixIn, TCPServer):
     pass
 
 
@@ -140,8 +164,8 @@ class RequestHandler(object):
         self.process()
 
     def process(self):
-        print "connected by", self.client_address
-        print self.conn.recv(1024)
+        # print self.conn.recv(1024)
+        time.sleep(2)
         response = "HTTP/1.1 200 OK\r\nServer:tcp server\r\nContent-Length:11\r\n\r\nhello world"
         self.conn.sendall(response)
 
