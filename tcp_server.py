@@ -176,11 +176,39 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
 
 
 class RequestHandler(object):
+    rbufsize = -1
+    wbufsize = 0
+    timeout = None
+
+    disable_nagle_algorithm = False
+
     def __init__(self, conn, client_address, server):
         self.conn = conn
         self.client_address = client_address
         self.server = server
-        self.process()
+        self.setup()
+        try:
+            self.handle()
+        finally:
+            self.finish()
+
+    def setup(self):
+        if self.timeout is not None:
+            self.conn.settimeout(self.timeout)
+        if self.disable_nagle_algorithm:
+            self.conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, True)
+        self.rfile = self.conn.makefile('rb', self.rbufsize)
+        self.wfile = self.conn.makefile('wb', self.wbufsize)
+
+    def finish(self):
+        if not self.wfile.closed:
+            try:
+                self.wfile.flush()
+            except socket.error:
+                pass
+
+        self.wfile.close()
+        self.rfile.close()
 
     def process(self):
         print self.conn.recv(1024)
