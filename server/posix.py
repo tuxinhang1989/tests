@@ -1,6 +1,7 @@
 # encoding: utf-8
 import fcntl
 import os
+import signal
 
 
 def set_close_exec(fd):
@@ -41,10 +42,24 @@ class Waker(object):
                 result = self.reader.read()
                 if not result:
                     break
+            return result
         except IOError:
             pass
 
     def close(self):
         self.reader.close()
         self.writer.close()
+
+
+def handler(signum, frame):
+    print signum
+    print waker.reader.read()
+
+
+waker = Waker()
+
+if __name__ == "__main__":
+    signal.set_wakeup_fd(waker.write_fileno())
+    signal.signal(signal.SIGALRM, handler)
+    signal.pause()
 
