@@ -2,10 +2,13 @@
 import select
 import time
 import heapq
+import signal
 import collections
 import itertools
 
 from posix import set_close_exec, Waker
+
+_POLL_TIMEOUT = 0.5
 
 
 class EPollIOLoop(object):
@@ -76,6 +79,15 @@ class EPollIOLoop(object):
             return
         self._running = True
 
+        old_wakeup_fd = None
+        try:
+            old_wakeup_fd = signal.set_wakeup_fd(self._waker.write_fileno())
+            if old_wakeup_fd != -1:
+                signal.set_wakeup_fd(old_wakeup_fd)
+                old_wakeup_fd = None
+        except ValueError:
+            old_wakeup_fd = None
+
         try:
             while True:
                 ncallbacks = len(self._callbacks)
@@ -140,6 +152,8 @@ class EPollIOLoop(object):
 
         finally:
             self._stopped = False
+            if old_wakeup_fd is not None:
+                signal.set_wakeup_fd(old_wakeup_fd)
 
     def stop(self):
         self._running = False
@@ -169,7 +183,27 @@ class EPollIOLoop(object):
     def handle_callback_exception(self, callback):
         print "Exception in callback %r" % callback
 
+    def remove_timeout(self, timeout):
+        timeout.callback = None
+        self._cancellations += 1
+
     def _run_callback(self, callback):
         try:
             ret = callback()
-            if re
+            if ret is not None:
+                from tornado import gen
+                try:
+                    ret = gen.convert_yielded(ret)
+                except gen.BadYieldError:
+                    pass
+                else:
+                    self.add_future(ret, self._discard_future_result)
+        except Exception:
+            self.handle_callback_exception(callback)
+
+    def _discard_future_result(self, future):
+        future.result()
+
+    def add_future(self, future, callback):
+        future.add_done_callback(lambda future: self.add_callback(callback, future))
+

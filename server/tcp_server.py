@@ -1,12 +1,17 @@
 # encoding: utf-8
 import socket
 import select
-import errno
 import os
 import time
 import threading
 
 from request_handler import RequestHandler
+
+from .posix import set_close_exec
+from .iostream import IOStream, errno_from_exception, _ERRNO_WOULDBLOCK
+from .ioloop import EPollIOLoop
+
+_DEFAULT_BACKLOG = 128
 
 
 def _quote_html(html):
@@ -185,9 +190,72 @@ class ThreadingTCPServer(ThreadingMixIn, TCPServer):
     pass
 
 
+class AsyncTCPServer(object):
+    def __init__(self, io_loop, max_buffer_size=None, read_chunk_size=None):
+        self.io_loop = io_loop
+        self._started = False
+        self._stopped = False
+        self.max_buffer_size = max_buffer_size
+        self.read_chunk_size = read_chunk_size
+
+    def listen(self, port, address=""):
+        s = self.bind_socket(port, address=address)
+        self.add_socket(s)
+
+    def bind_socket(self, port, address=""):
+        self.sock = s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        set_close_exec(s.fileno())
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.setblocking(False)
+        s.bind((address, port))
+        s.listen(_DEFAULT_BACKLOG)
+        return s
+
+    def add_socket(self, s):
+        """ Add to ioloop 
+        """
+        def accept_handler(fd, events):
+            for i in xrange(_DEFAULT_BACKLOG):
+                try:
+                    connection, address = s.accept()
+                except socket.error as e:
+                    if errno_from_exception(e) in _ERRNO_WOULDBLOCK:
+                        return
+                    raise
+                self._handle_connection(connection, address)
+        self.io_loop.add_handler(s, accept_handler, self.io_loop.READ)
+
+    def stop(self):
+        if self._stopped:
+            return
+        self._stopped = True
+        self.io_loop.remove_handler(self.sock)
+        self.sock.close()
+
+    def handle_stream(self, stream, address):
+        print("Hello world")
+
+    def _handle_connection(self, connection, address):
+        try:
+            stream = IOStream(connection, io_loop=self.io_loop, 
+                    max_buffer_size=self.max_buffer_size, read_chunk_size=self.read_chunk_size)
+            future = self.handle_stream(stream, address)
+            if future is not None:
+                self.io_loop.add_future(future, lambda f: f.result())
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            print("Error in connection callback")
+
+
 if __name__ == "__main__":
     server_address = ("0.0.0.0", 8008)
-    server = ThreadingTCPServer(server_address, RequestHandler)
+    # server = ThreadingTCPServer(server_address, RequestHandler)
+    io_loop = EPollIOLoop()
+    server = AsyncTCPServer(io_loop)
+    server.listen(8008, "0.0.0.0")
+    io_loop.start()
+    """
     try:
         server.serve_forever()
     except (OSError, select.error) as e:
@@ -195,4 +263,4 @@ if __name__ == "__main__":
             raise
     except KeyboardInterrupt:
         server.close()
-
+    """
